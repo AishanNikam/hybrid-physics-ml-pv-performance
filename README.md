@@ -2,848 +2,262 @@
 
 **Research project | August–November 2026**
 
-A physics-guided machine-learning study investigating photovoltaic (PV) power prediction under changing irradiance, temperature, and partial-shading conditions.
+A physics-guided machine-learning study of photovoltaic (PV) power prediction under partial shading and varying irradiance and temperature. We compare a physics model, a pure ML model, and a **hybrid residual model** that keeps the physics prediction and learns only a correction to it:
 
-The project compares three approaches:
+$$P_\text{hybrid} = P_\text{physics} + f_\theta(X), \qquad f_\theta \approx P_\text{reference} - P_\text{physics}$$
 
-1. A physics-based PV model using the pvlib CEC single-diode model.
+## Key results
 
-2. A pure machine-learning model using XGBoost.
+| Setting | Physics | Pure ML | **Hybrid** | Hybrid vs physics |
+|---|---:|---:|---:|---:|
+| Simulation, 12-panel array, IID test | 263.9 W | 73.4 W | **58.2 W** | −78% |
+| Simulation, all out-of-distribution (OOD) rows | 298.9 W | 233.3 W | **84.1 W** | −72% |
+| Field data, PVDAQ 2107, locked 2025 test | 59.4 kW | 53.4 kW | **48.7 kW** | −18% |
 
-3. A hybrid physics–ML model that learns to correct the residual errors of the physics model.
+- **Simulation (cell-level shading with bypass diodes):** the hybrid has the lowest RMSE in all 8 test regimes. It also beats a constant-offset correction and a linear correction. Pure ML breaks down outside the training irradiance range. For example, with G out of range it scores 334 W, worse than physics alone. The hybrid stays at 91 W.
+- **Field data:** the hybrid beats pure ML by 4.7 kW (95% CI from −5.5 to −4.0 kW). On this unshaded field system, though, a *linear* residual correction does as well as the XGBoost correction (48.5 vs 48.7 kW). The more complex correction pays off where real mismatch effects exist (simulation), not on field data without shading labels.
 
-Controlled PV simulations are used to investigate performance under defined operating conditions and out-of-distribution (OOD) regimes. A chronological holdout evaluation using NREL PVDAQ System 2107 assesses performance on real-world field measurements.
-
-> **Main real-world result:** On the 2025 PVDAQ chronological holdout (16,837 observations), the hybrid model achieved an RMSE of **56.12 kW**, compared with **59.36 kW** for the physics-only baseline and **56.41 kW** for pure ML. This represents a **5.46% RMSE reduction** relative to physics-only. The improvement over pure ML was 0.51%. The relatively modest field-data improvement is reported separately from the larger gains observed in controlled simulations.
+All RMSEs are reported with 95% bootstrap confidence intervals. See [Results](#5-results).
 
 ---
 
-## 1. Research Question
+## 1. Research question
 
-**In which irradiance, temperature, and partial-shading regimes does a physics-based PV model deviate from a higher-fidelity reference or measured power, and can residual machine learning correct part of that error?**
+> In which irradiance, temperature and partial-shading regimes does a physics-based PV model deviate from the true (higher-fidelity or measured) power, and can residual machine learning correct that error better than pure ML or simple corrections?
 
-The objective is not to replace the physics model with a black-box ML predictor. Instead, the hybrid approach retains the physical model prediction and learns a correction to its residual error.
+## 2. Models
 
-## 2. Methodology
+| Model | Description |
+|---|---|
+| **Physics** | pvlib CEC single-diode model. Shading enters only as reduced mean irradiance, so mismatch and bypass-diode effects are ignored. |
+| **Physics + offset** | Physics plus the mean training residual. This is the trivial-correction baseline. |
+| **Linear correction** | Physics plus a ridge regression on the residual. |
+| **Pure ML** | XGBoost predicting power directly from the inputs. |
+| **Hybrid** | Physics plus XGBoost predicting the residual. |
 
-Three models are evaluated.
-
-### 2.1 Physics-only model
-
-A physics-based photovoltaic model provides the baseline power prediction:
-
-\\\[
-
-P\_{\\text{physics}}
-
-\\]
-
-The model is implemented using pvlib and a CEC single-diode modelling approach.
-
-### 2.2 Pure machine-learning model
-
-An XGBoost regressor directly predicts PV power from the input features:
-
-\\\[
-
-X \\rightarrow P\_{\\text{ML}}
-
-\\]
-
-For controlled simulations, the input features are:
-
-- Irradiance
-
-- Temperature
-
-- Shading fraction
-
-For PVDAQ, the input features are:
-
-- Plane-of-array irradiance
-
-- Ambient temperature
-
-- Estimated cell temperature
-
-- Wind speed
-
-### 2.3 Hybrid residual model
-
-The hybrid model learns the difference between the reference power and the physics prediction:
-
-\\\[
-
-\\Delta P = P\_{\\text{reference}} - P\_{\\text{physics}}
-
-\\]
-
-The ML model estimates this residual:
-
-\\\[
-
-\\Delta P\_{\\text{ML}} = f\_\\theta(X)
-
-\\]
-
-The final hybrid prediction is:
-
-\\\[
-
-P\_{\\text{hybrid}}
-
-=
-
-P\_{\\text{physics}}+\\Delta P\_{\\text{ML}}
-
-\\]
-
-In controlled simulations, the reference target is simulated global maximum power. In PVDAQ, the reference target is measured DC power.
-
-These are different evaluation settings and their results should not be conflated.
-
-### 2.4 Physics model configuration
-
-The physics baseline uses:
-
-- **PV model:** pvlib CEC single-diode implementation.
-
-- **Module parameterization:** Canadian Solar CS6P-260P CEC module parameters.
-
-- **Cell temperature:** SAPM open-rack glass-glass temperature model.
-
-- **Controlled shading representation:** effective irradiance is reduced using the supplied shading fraction:
-
-\\\[
-
-G\_{\\text{effective}}=G(1-s)
-
-\\]
-
-- **PVDAQ system scaling:** module-level physics predictions are scaled using an estimated module count of 2,797, corresponding to an estimated system STC capacity of approximately 727.85 kW.
-
-The single-diode output is treated as a physics baseline, not as ground truth. The controlled simulation's global maximum power is the reference target for simulation experiments, while PVDAQ measured DC power is the observed field target.
-
-### 2.5 Machine-learning configuration
-
-The main XGBoost configuration uses:
-
-| Parameter | Value |
-
-|---|---:|
-
-| Number of estimators | 300 |
-
-| Maximum tree depth | 4 |
-
-| Learning rate | 0.03 |
-
-| Subsample | 0.8 |
-
-| Column subsample | 0.8 |
-
-| Objective | Squared-error regression |
-
-| Random state | 42 |
-
-The residual model follows the same general configuration, with the random seed varied in the multi-seed experiment.
-
----
+XGBoost settings are the same for every model: 300 trees, max depth 4, learning rate 0.03, subsample 0.8, colsample 0.8. Results are averaged over seeds `[42, 7, 21, 100, 123]`.
 
 ## 3. Datasets
 
-The project uses two complementary data sources.
+### 3.1 PVMismatch 12-panel shading simulation (main simulation dataset)
 
-### 3.1 NREL PVDAQ System 2107 — Real-world field data
+`data/processed/pvmismatch_12panel_5000.csv` (5,000 rows), generated by `notebooks/Sprint2_dataset_generation.ipynb`.
 
-The cleaned PVDAQ System 2107 dataset contains:
+- **Array:** 3 strings × 4 modules. The module is `AU_Optronics_PM096B00_323`, 96 cells.
+- **Reference power:** **PVMismatch**, a cell-level simulation that includes bypass diodes.
+- **Physics power:** pvlib single-diode model using the mean irradiance over the array. Both simulators share one SAPM cell-temperature model.
+- **Shading:** each panel receives a fraction `S1…S12` of the irradiance. 70% of the rows use random masks and 30% use structured masks (single panel, same string vs different strings, uniform, etc.).
+- **Operating ranges and OOD flags:**
 
-- 127,309 observations
-
-- 15-minute measurement intervals
-
-- Operating period: 2017–2025
-
-- Plane-of-array irradiance
-
-- Ambient temperature
-
-- Wind speed
-
-- DC power
-
-- AC power
-
-- Derived operating-condition variables
-
-#### Chronological holdout evaluation
-
-The field-data evaluation uses a chronological split:
-
-| Split | Period | Samples |
-
-|---|---|---:|
-
-| Training | 2024 | 16,754 |
-
-| Test | 2025 | 16,837 |
-
-The 2025 observations are held out from model training and evaluation tuning.
-
-Missing wind-speed values used in the cell-temperature calculation are filled using the 2024 training-period median wind speed. The same training-derived value is applied to the test period.
-
-This is a chronological holdout evaluation on the same PVDAQ System 2107, not an independent validation on a separate PV installation.
-
-**Important:** PVDAQ System 2107 does not contain explicit partial-shading labels. Its field evaluation therefore assesses naturally varying operating conditions and cannot isolate partial shading as the cause of an observed residual.
-
-### 3.2 Controlled PV simulation — Partial-shading experiments
-
-The processed controlled simulation dataset contains **496 observations**.
-
-Its main variables include:
-
-- Irradiance: 500–1,000 W/m²
-
-- Temperature: 20–50 °C
-
-- Shading fraction: 0–50%
-
-- Simulated global maximum power
-
-- Local maximum power, where available
-
-- Physics-model power
-
-- Physics residual
-
-- Peak mismatch
-
-#### Simulation coverage limitation
-
-The dataset is not a complete irradiance × temperature × shading factorial grid.
-
-- Unshaded observations span irradiance levels from 500 to 1,000 W/m².
-
-- Shading levels of 10–50% are available only at 1,000 W/m².
-
-- The dataset does not represent every possible combination of irradiance, temperature, and shading.
-
-- No panel-level spatial shading masks are represented.
-
-Consequently, the OOD results should be interpreted within the specific operating conditions covered by the dataset.
-
-### 3.3 Data availability
-
-The full cleaned dataset `PVDAQ\_2107\_clean.csv` is intentionally excluded from Git using `.gitignore`.
-
-The repository tracks:
-
-```text
-
-data/
-
-├── processed/
-
-│   ├── PVDAQ\_residuals\_clean.csv
-
-│   └── PV\_simulation\_clean.csv
-
-│
-
-└── sample/
-
-&#x20;   └── PVDAQ\_2107\_sample.csv
-
-```
-
-The sample dataset is not sufficient to reproduce the complete 2024–2025 PVDAQ evaluation.
-
-To rerun the complete PVDAQ validation, the corresponding full NREL PVDAQ System 2107 dataset must be obtained and processed into:
-
-```text
-
-data/processed/PVDAQ\_2107\_clean.csv
-
-```
-
-Researchers reproducing the field evaluation should consult NREL PVDAQ for the source data and follow its data-access and attribution requirements.
-
----
-
-## 4. Experimental Design
-
-The project evaluates performance under five controlled simulation experiments.
-
-### 4.1 IID experiment
-
-A random 80/20 train-test split is created using:
-
-```python
-
-test\_size=0.20
-
-random\_state=42
-
-```
-
-The split contains:
-
-- Training: 396 observations
-
-- Testing: 100 observations
-
-This evaluates performance on a random holdout from the sampled simulation conditions. It tests interpolation within the dataset rather than generalization to entirely new physical regimes.
-
-### 4.2 Temperature OOD
-
-| Dataset portion | Temperature |
-
-|---|---|
-
-| Training | 20–40 °C |
-
-| Testing | 41–50 °C |
-
-The test set contains temperature values beyond the training range.
-
-### 4.3 Irradiance OOD
-
-This experiment uses only unshaded observations to isolate irradiance extrapolation.
-
-| Dataset portion | Irradiance | Shading |
-
+| Parameter | IID (training) range | OOD range |
 |---|---|---|
+| Irradiance G | 200–1000 W/m² | 100–200 and 1000–1200 W/m² |
+| Ambient temperature T | 10–45 °C | 0–10 and 45–60 °C |
+| Shading severity | 20–65 % | 65–80 % |
 
-| Training | 500–900 W/m² | 0% |
+- **Rows per flag:** 1,686 IID and 3,314 OOD. The OOD rows split into 7 groups: `T_ood`, `G_ood`, `shade_ood` and their combinations.
+- **Calibration:** with no shading, PVMismatch and pvlib agree to within about ±5% across the operating range. The two models use different cell parameters, so this residual gap is genuine.
 
-| Testing | 950–1,000 W/m² | 0% |
+> **Bug fix (2026-11-25).** The original generator built each module from 96 separately created `PVcell(Tcell=…)` objects. At high cell temperature this made the array's power collapse, giving 4 W instead of about 700 W in one case and producing 343 invalid rows. The generator now uses PVMismatch's `setTemps`/`setSuns`. This is also about 20× faster: 5,000 rows take under a minute. Any dataset made with the old notebook should be regenerated.
 
-### 4.4 Shading OOD
+### 3.2 NREL PVDAQ System 2107 (field data)
 
-Irradiance is fixed at 1,000 W/m².
+`data/processed/PVDAQ_2107_clean.csv` holds about 127k rows of 15-minute data from 2017 to 2025. It is **kept out of Git** (`.gitignore`) and must be placed there locally.
 
-| Dataset portion | Shading |
+- **Fields:** plane-of-array irradiance, ambient temperature, wind speed and DC power.
+- **The DC target exists only for 2024–2025.** Earlier years have only inverter-derived power, a different measurement, so only 2024–2025 are used.
+- **No shading labels.** Field results therefore cannot isolate partial shading as the cause of any error.
+- `data/processed/PVDAQ_residuals_clean.csv` contains the 2024–2025 subset with physics predictions, and `data/sample/PVDAQ_2107_sample.csv` is a 15k-row sample for plotting.
 
+### 3.3 Preliminary simulation (legacy)
+
+`data/processed/PV_simulation_clean.csv` (496 rows) comes from an earlier, simpler simulation.
+
+- Shading is modelled only as irradiance reduction.
+- Shading is present only at 1000 W/m².
+
+It is superseded by §3.1 and kept for reference. See [§8](#8-legacy-experiments).
+
+## 4. Evaluation protocol
+
+**Simulation (`run_pvmismatch.py`)**
+- Models are trained **only on IID rows**.
+- IID test: 5 seeds × 80/20 split of the IID rows.
+- OOD test: models are trained on all IID rows and evaluated on each OOD group.
+- 95% CIs come from a bootstrap over test rows. Hybrid vs pure ML is compared with a paired bootstrap.
+
+**Field data (`run_pvdaq_v2.py`). The test data is never used for any design choice.**
+
+| Year | Role |
 |---|---|
-
-| Training | 0–30% |
-
-| Testing | 40–50% |
-
-This evaluates performance under shading levels not represented in training.
-
-### 4.5 Combined OOD stress test
-
-This experiment evaluates a joint severe-shading and high-temperature condition.
-
-| Dataset portion | Irradiance | Shading | Temperature |
-
-|---|---|---|---|
-
-| Training | 1,000 W/m² | 0–30% | 20–50 °C |
-
-| Testing | 1,000 W/m² | 40–50% | 41–50 °C |
-
-The test set contains 20 observations.
-
-**Important interpretation:** Temperatures of 41–50 °C are represented in the training dataset under lower shading conditions. Therefore, temperature is not individually unseen. The held-out condition is the combination of severe shading with high temperature.
-
-This experiment should be interpreted as a small joint-condition stress test, not as a statistically comprehensive benchmark.
-
----
-
-## 5. Experimental Results
-
-### 5.1 Controlled simulation: Three-model comparison
-
-The following table compares the physics-only, pure ML, and hybrid residual models.
-
-All RMSE values are in watts. Lower RMSE indicates better prediction accuracy.
-
-| Experiment | Test samples | Physics RMSE | Pure ML RMSE | Hybrid RMSE | Hybrid reduction vs Physics |
-
-|---|---:|---:|---:|---:|---:|
-
-| IID | 100 | 12.550 | 2.760 | **0.733** | 94.2% |
-
-| Temperature OOD | 160 | 11.824 | 5.741 | **0.248** | 97.9% |
-
-| Irradiance OOD | 62 | 20.865 | 20.529 | **6.197** | 70.3% |
-
-| Shading OOD | 62 | 19.345 | 48.093 | **13.450** | 30.5% |
-
-| Combined OOD | 20 | 18.779 | 46.150 | **13.040** | 30.6% |
-
-Across all five evaluated simulation regimes, the hybrid residual model achieves the lowest RMSE.
-
-The largest reductions relative to the physics baseline occur in the IID and temperature OOD experiments.
-
-Under severe unseen shading, pure ML shows substantial extrapolation error, while the hybrid model retains a lower RMSE than both the pure ML model and the physics baseline.
-
-The combined OOD result should be interpreted cautiously because its test set contains only 20 observations.
-
-### 5.2 Multi-seed IID robustness
-
-A separate five-seed repeated random holdout experiment evaluates sensitivity to the random train-test split.
-
-Seeds:
-
-```text
-
-\[42, 7, 21, 100, 123]
-
-```
-
-Mean RMSE and sample standard deviation:
-
-| Model | Mean RMSE (W) | Standard deviation (W) |
-
-|---|---:|---:|
-
-| Physics-only | 12.166 | 0.387 |
-
-| Pure ML | 2.213 | 0.380 |
-
-| Hybrid residual | **0.556** | **0.125** |
-
-The hybrid model achieves the lowest mean RMSE and the lowest variability across the five evaluated seeds.
-
-This experiment is a repeated random holdout analysis, not five-fold cross-validation.
-
-### 5.3 Feature ablation study
-
-The ablation experiment evaluates seven feature combinations:
-
-- Irradiance + Temperature + Shading
-
-- Irradiance + Temperature
-
-- Irradiance + Shading
-
-- Temperature + Shading
-
-- Irradiance only
-
-- Temperature only
-
-- Shading only
-
-The ablation results indicate:
-
-- In IID and temperature OOD experiments, the full three-feature combination achieves the lowest RMSE.
-
-- In irradiance OOD, irradiance alone performs marginally better, consistent with the experiment isolating unshaded irradiance variation.
-
-- In shading OOD, shading alone performs marginally better.
-
-- In combined OOD, shading alone also performs marginally better.
-
-These findings describe performance under the specific experimental splits. They should not be interpreted as universal feature-importance rankings or causal effects.
-
-The full-feature IID ablation uses the same 396/100 split as the main IID experiment.
-
----
-
-## 6. PVDAQ Chronological Holdout Results
-
-The PVDAQ evaluation uses 2024 for training and 2025 for testing.
-
-All MAE, RMSE, and bias values are in kilowatts.
-
-| Model | MAE (kW) | RMSE (kW) | R² | Bias (kW) |
-
-|---|---:|---:|---:|---:|
-
-| Physics-only | 41.90 | 59.36 | 0.9383 | -26.78 |
-
-| Pure ML | 39.24 | 56.41 | 0.9443 | -7.88 |
-
-| Hybrid residual | **39.13** | **56.12** | **0.9449** | -8.50 |
-
-The hybrid residual model reduces RMSE by:
-
-- **5.46% relative to physics-only**
-
-- **0.51% relative to pure ML**
-
-The physics baseline exhibits negative mean bias. Both ML-based approaches reduce the magnitude of this bias.
-
-The improvement on field data is substantially smaller than the gains observed in controlled simulations.
-
-This difference is an important finding: strong performance on a controlled simulation dataset does not automatically translate into equally large improvements on real-world PV data.
-
-The field evaluation is limited to a chronological holdout from one PV system. Further validation on additional PV installations and operating periods is necessary.
-
----
-
-## 7. PVDAQ Error-Regime Analysis
-
-The PVDAQ error-regime analysis compares hybrid RMSE with physics-only RMSE across operating-condition bins.
-
-The evaluated regimes are:
-
-- Irradiance
-
-- Estimated cell temperature
-
-- Wind speed
-
-- Time of day
-
-Selected findings from the corrected 2025 holdout:
-
-| Operating regime | Hybrid RMSE reduction vs Physics |
-
-|---|---:|
-
-| Irradiance 700–900 W/m² | 9.44% |
-
-| Irradiance 900–1,100 W/m² | 9.34% |
-
-| Cell temperature above 40 °C | 8.65% |
-
-| Wind speed 2–3 m/s | 8.47% |
-
-| Wind speed 3–5 m/s | 9.76% |
-
-| Time 08:00–10:00 | 12.58% |
-
-| Time 10:00–12:00 | 10.45% |
-
-The hybrid model is worse than the physics baseline in some regimes, including:
-
-- Irradiance below 100 W/m²
-
-- Wind speed above 8 m/s
-
-- Late-afternoon and evening periods
-
-For example, the 16:00–18:00 regime shows a 14.37% increase in RMSE relative to physics-only.
-
-These are empirical associations. They do not establish the physical cause of the prediction errors. Small sample groups, such as the 19 observations above 1,100 W/m², should be interpreted cautiously.
-
-Since the PVDAQ dataset has no explicit shading labels, these field-error patterns cannot be attributed specifically to partial shading.
-
----
-
-## 8. Visual Results
-
-Figures generated by the analysis scripts are stored in `results/figures/`.
-
-### PVDAQ chronological holdout evaluation
-
-| Figure | Description |
-
+| 2024 | **Development.** All choices are made by blocked 6-fold CV *within 2024* (2-month blocks). This includes the feature set and the module-count scaling. |
+| 2025 | **Locked test.** Every model is evaluated on it once. |
+
+- **Feature sets:**
+  - `base`: POA irradiance, ambient temperature, cell temperature and wind.
+  - `base+time`: `base` plus cyclic hour-of-day and day-of-year terms, as a stand-in for sun position because site coordinates are not in the data.
+  - CV on 2024 selected `base+time`.
+- **Confidence intervals** use a **day-block bootstrap**, because readings within a day are autocorrelated. They are paired across models.
+- Predictions are clipped at 0 kW.
+
+## 5. Results
+
+### 5.1 Simulation: RMSE (W) by regime
+
+Results are pooled over 5 seeds; *n* is the number of test rows per seed.
+
+| Test set | n | Physics | Phys.+offset | Linear corr. | Pure ML | **Hybrid** | Hybrid vs physics |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| IID | 338 | 263.9 | 174.2 | 99.4 | 73.4 | **58.2** | −78% |
+| T-OOD | 1228 | 264.2 | 177.3 | 102.7 | 91.1 | **58.8** | −78% |
+| G-OOD | 677 | 324.3 | 247.8 | 159.3 | 333.7 | **91.4** | −72% |
+| Shade-OOD | 409 | 287.5 | 139.4 | 141.5 | 145.6 | **82.4** | −71% |
+| T+Shade OOD | 302 | 285.8 | 151.4 | 139.0 | 176.8 | **94.0** | −67% |
+| G+T OOD | 445 | 347.7 | 272.5 | 169.9 | 324.2 | **97.3** | −72% |
+| G+Shade OOD | 152 | 337.8 | 210.4 | 178.4 | 375.8 | **124.7** | −63% |
+| G+T+Shade OOD | 101 | 305.7 | 195.1 | 181.9 | 290.7 | **122.9** | −60% |
+| **All OOD** | 3314 | 298.9 | 204.6 | 140.2 | 233.3 | **84.1** | −72% |
+
+- **Hybrid vs pure ML:** the hybrid is significantly better in every regime (paired bootstrap, p < 0.001). The difference ranges from −15 W (IID) to −251 W (G+Shade).
+- **Seed robustness:** the hybrid's RMSE has a seed standard deviation of 0.4–3.4 W.
+- **Error vs shading severity:** pvlib overestimates shaded power by about 18% on average. The hybrid's advantage is largest for light-to-moderate, *uneven* shading. Under heavy, near-uniform shading (more than 30% mean severity) the mean-irradiance assumption holds well, and physics alone is competitive.
+
+### 5.2 Field data: PVDAQ 2107, locked 2025 test (16,837 readings)
+
+| Model | Features | RMSE (kW) [95% CI] | MAE (kW) | Bias (kW) | R² |
+|---|---|---:|---:|---:|---:|
+| Physics | — | 59.36 [57.0, 61.6] | 41.90 | −26.78 | 0.938 |
+| Physics + offset | — | 53.53 [51.1, 56.0] | 37.15 | −7.63 | 0.950 |
+| Linear corr. | base | 52.56 [50.1, 55.1] | 34.68 | −6.78 | 0.952 |
+| Pure ML | base | 56.23 [53.8, 58.7] | 39.15 | −7.98 | 0.945 |
+| Hybrid | base | 56.02 [53.6, 58.4] | 39.04 | −8.58 | 0.945 |
+| Linear corr. | base+time | **48.49** [45.7, 51.2] | 32.97 | −6.84 | 0.959 |
+| Pure ML | base+time | 53.45 [50.9, 55.9] | 38.44 | −11.92 | 0.950 |
+| **Hybrid** | base+time | **48.72** [45.8, 51.4] | 33.25 | −7.46 | 0.958 |
+
+**Paired day-block bootstrap results**
+
+| Comparison | ΔRMSE (kW) | 95% CI |
+|---|---:|---|
+| Hybrid vs pure ML (base+time) | −4.73 | [−5.48, −4.02] |
+| Hybrid vs physics (base+time) | −10.64 | [−12.14, −9.12] |
+| Hybrid +time vs hybrid base | −7.30 | [−8.66, −5.87] |
+
+**Interpretation**
+- With the original four inputs, the hybrid (56.0 kW) does **not** beat a simple constant-offset correction (53.5 kW). Most of the earlier reported gain came from removing pvlib's −27 kW mean bias.
+- Adding time-of-day and day-of-year terms gives the real improvement. These terms capture effects the physics model omits, such as angle of incidence and seasonal soiling.
+
+### 5.3 Field data: error by regime (2025)
+
+From `results/metrics/pvdaq_v2/test2025_regimes.csv`, hybrid with `base+time`:
+
+| Regime | Physics RMSE | Hybrid RMSE | Change |
+|---|---:|---:|---:|
+| Cell temperature > 40 °C | 62.6 | 38.9 | −38% |
+| 08:00–10:00 | 62.1 | 40.3 | −35% |
+| Irradiance 900–1100 W/m² | 60.0 | 45.9 | −24% |
+| 16:00–18:00 | 41.5 | 42.1 | +1% (was +14% in the earlier version) |
+| Irradiance < 100 W/m² | 15.1 | 20.9 | **+38%** |
+| 06:00–08:00 | 16.6 | 25.4 | **+53%** |
+
+**Known weakness:** at dawn, at dusk and below 100 W/m² the hybrid is worse than physics alone. The absolute errors there are small, since power is low.
+
+## 6. Figures
+
+IEEE-sized figures, in PDF and PNG, are in `results/figures/paper/`:
+
+| File | Content |
 |---|---|
+| `fig_sim_rmse_by_regime` | Simulation RMSE by regime, 4 models, 95% CI |
+| `fig_sim_parity_ood` | Predicted vs reference power on OOD rows. Pure ML saturates at about 3.5 kW (no extrapolation). |
+| `fig_sim_rmse_vs_severity` | RMSE vs mean shading severity |
+| `fig_field_rmse_summary` | PVDAQ 2025 RMSE for all models with CIs |
+| `fig_field_rmse_by_hour` | PVDAQ 2025 RMSE by time of day |
+| `fig_field_rmse_by_irradiance` | PVDAQ 2025 RMSE by irradiance |
 
-| `pvdaq\_hybrid\_improvement\_by\_regime.png` | Hybrid RMSE reduction relative to physics across PVDAQ regimes |
+## 7. Reproducing
 
-| `pvdaq\_rmse\_irradiance.png` | Model RMSE by irradiance bin |
+**Environment**
+- Developed with Python 3.12. Install the dependencies with `pip install -r requirements.txt`.
+- `requirements.txt` pins the versions the current results were produced with.
 
-| `pvdaq\_rmse\_temperature.png` | Model RMSE by cell-temperature bin |
+**Steps.** Run everything from the repository root.
 
-| `pvdaq\_rmse\_wind.png` | Model RMSE by wind-speed bin |
+```bash
+# 1. (optional) regenerate the shading dataset (~1 min on 6 cores)
+#    open notebooks/Sprint2_dataset_generation.ipynb and run all cells,
+#    then copy the CSV it writes to data/processed/pvmismatch_12panel_5000.csv
 
-| `pvdaq\_rmse\_hour.png` | Model RMSE by time-of-day bin |
+# 2. simulation experiment  (~10 s)
+python src/experiments/run_pvmismatch.py
 
-### Earlier dataset and simulation analysis
+# 3. field experiment; needs data/processed/PVDAQ_2107_clean.csv  (~10 s)
+python src/experiments/run_pvdaq_v2.py
 
-- `fig1\_dataset\_overview.png`
+# 4. regime analysis + paper figures
+python src/experiments/make_paper_figures.py
+```
 
-- `fig2\_cleaning\_waterfall.png`
+**Outputs**
+- `results/metrics/pvmismatch/`: per-regime metrics, paired tests and predictions.
+- `results/metrics/pvdaq_v2/`: 2024 CV folds, 2025 test metrics, paired tests, regimes and predictions.
+- `results/figures/paper/`: the figures listed in §6.
 
-- `fig3\_pvdaq\_distributions.png`
+## 8. Legacy experiments
 
-- `fig4\_residual\_analysis.png`
+The first project phase produced the scripts below. They are kept for transparency but superseded by the work above.
 
-- `fig5\_error\_heatmaps.png`
+- **Simulation:** `run_iid.py`, `run_temperature_ood.py`, `run_irradiance_ood.py`, `run_shading_ood.py`, `run_combined_ood.py`, `run_ablation.py`, `run_multiseed.py` and `final_comparison.py`. They use the 496-row preliminary dataset (§3.3).
+- **Field data:** `run_pvdaq_validation.py`, `pvdaq_error_regime_analysis.py` and `plot_pvdaq_analysis.py`. This is the original PVDAQ 2024/2025 evaluation, without baselines or CIs.
+- **Outputs:** in `results/metrics/*.csv` (top level) and `results/figures/*.png`.
 
-- `fig6\_simulation\_shading.png`
+Main differences from the current pipeline:
 
-- `fig7\_cross\_dataset.png`
+| Legacy | Current |
+|---|---|
+| Shading = irradiance reduction, only at 1000 W/m² | Panel-level masks with bypass diodes at all irradiances |
+| No baseline beyond physics | Offset and linear-correction baselines |
+| Single split, no CIs | Multi-seed, bootstrap and day-block CIs |
+| PVDAQ hybrid 56.12 kW (−5.5% vs physics), not tested against an offset baseline | 48.72 kW (−18%), with significance tests |
 
-- `fig8\_long\_term\_trends.png`
+## 9. Limitations
 
-- `fig9\_summary\_metrics.png`
+1. **Simulation reference.** PVMismatch is a simulator, not measured data, and its default cell parameters differ slightly from the CEC module (±5% unshaded gap).
+2. **Fixed hyperparameters.** XGBoost hyperparameters were not tuned. Both ML models use the same settings.
+3. **One field system with no shading labels.** The field evaluation covers one PV system without shading labels. Field gains cannot be attributed to shading, and independent validation on other systems is needed.
+4. **Field gains come mostly from simple corrections.** On field data, a linear residual correction matches the XGBoost hybrid.
+5. **Approximate sun position.** No site coordinates are available, so sun position is approximated by cyclic time features.
+6. **Physics scaling.** The module count used to scale the physics model is estimated from the 2024 peak power.
+7. **Low-irradiance weakness.** The hybrid underperforms physics at dawn and dusk (§5.3).
 
-Other prediction and comparison plots are also available in `results/figures/`.
-
----
-
-## 9. Repository Structure
+## 10. Repository structure
 
 ```text
-
-hybrid-physics-ml-pv-performance/
-
-│
-
-├── data/
-
-│   ├── processed/
-
-│   │   ├── PVDAQ\_2107\_clean.csv          # Local only; ignored by Git
-
-│   │   ├── PVDAQ\_residuals\_clean.csv
-
-│   │   └── PV\_simulation\_clean.csv
-
-│   │
-
-│   └── sample/
-
-│       └── PVDAQ\_2107\_sample.csv
-
-│
-
-├── docs/
-
-│   ├── Physics-guided-ML-for-PV-under-partial-shading.pptx
-
-│   ├── PV\_Hybrid\_ML\_Research\_Project\_Roadmap.pdf
-
-│   ├── PV\_Midsem\_v2 (1).pptx
-
-│   └── PV\_Working\_Paper.docx
-
-│
-
-├── results/
-
-│   ├── figures/
-
-│   ├── metrics/
-
-│   └── predictions/
-
-│
-
-├── src/
-
-│   ├── preprocessing/
-
-│   │   └── exploratory\_analysis.py
-
-│   │
-
-│   ├── experiments/
-
-│   │   ├── audit\_dataset.py
-
-│   │   ├── error\_regime\_analysis.py
-
-│   │   ├── final\_comparison.py
-
-│   │   ├── run\_iid.py
-
-│   │   ├── run\_temperature\_ood.py
-
-│   │   ├── run\_irradiance\_ood.py
-
-│   │   ├── run\_shading\_ood.py
-
-│   │   ├── run\_combined\_ood.py
-
-│   │   ├── run\_ablation.py
-
-│   │   ├── run\_multiseed.py
-
-│   │   ├── run\_pvdaq\_validation.py
-
-│   │   ├── pvdaq\_error\_regime\_analysis.py
-
-│   │   ├── plot\_pvdaq\_analysis.py
-
-│   │   ├── save\_predictions.py
-
-│   │   ├── plot\_predictions.py
-
-│   │   ├── plot\_hybrid\_improvement.py
-
-│   │   └── additional plotting scripts
-
-│   │
-
-│   └── explainability/
-
-│       └── feature\_importance.py
-
-│
-
-├── requirements.txt
-
-├── .gitignore
-
-└── README.md
-
+data/
+  processed/
+    pvmismatch_12panel_5000.csv     # main shading simulation (5,000 rows)
+    PVDAQ_2107_clean.csv            # field data — local only, git-ignored
+    PVDAQ_residuals_clean.csv       # 2024–25 subset with physics predictions
+    PV_simulation_clean.csv         # legacy 496-row simulation
+  sample/PVDAQ_2107_sample.csv
+notebooks/
+  Sprint2_dataset_generation.ipynb  # PVMismatch dataset generator (fixed)
+src/
+  experiments/
+    run_pvmismatch.py               # main simulation experiment
+    run_pvdaq_v2.py                 # field experiment (2024 dev / 2025 locked test)
+    make_paper_figures.py           # regime analysis + paper figures
+    ...                             # legacy scripts (§8)
+  preprocessing/exploratory_analysis.py
+  explainability/feature_importance.py
+results/
+  metrics/pvmismatch/  metrics/pvdaq_v2/  figures/paper/
+  (top-level metrics/ figures/ predictions/ = legacy)
+docs/                               # roadmap, mid-sem slides, working paper
 ```
 
-**Note:** `PVDAQ\_2107\_clean.csv` is required for rerunning the full PVDAQ validation but is not included in the Git repository. The tracked sample file does not replace the full dataset.
+## 11. Authors
 
----
+Teghvir Singh Jassal · Anshu Kumar · Aishaan
 
-## 10. Reproducibility
-
-### 10.1 Environment
-
-The project was developed and evaluated using:
-
-- Python 3.13.5
-
-- NumPy 2.4.0
-
-- Pandas 2.3.3
-
-- Matplotlib 3.10.8
-
-- Seaborn 0.13.2
-
-- SciPy 1.18.1
-
-- Scikit-learn 1.9.1
-
-- XGBoost 3.4.1
-
-- pvlib 0.16.1
-
-Install the dependencies from the repository root:
-
-```powershell
-
-python -m pip install -r requirements.txt
-
-```
-
-### 10.2 Run the controlled experiments
-
-```powershell
-
-# Fixed-split IID experiment
-
-python src/experiments/run\_iid.py
-
-# Temperature OOD
-
-python src/experiments/run\_temperature\_ood.py
-
-# Irradiance OOD
-
-python src/experiments/run\_irradiance\_ood.py
-
-# Shading OOD
-
-python src/experiments/run\_shading\_ood.py
-
-# Combined OOD stress test
-
-python src/experiments/run\_combined\_ood.py
-
-# Feature ablation
-
-python src/experiments/run\_ablation.py
-
-# Five-seed IID robustness
-
-python src/experiments/run\_multiseed.py
-
-# Final controlled-simulation comparison
-
-python src/experiments/final\_comparison.py
-
-```
-
-### 10.3 Run the PVDAQ evaluation
-
-The full cleaned PVDAQ file must first be available at:
-
-```text
-
-data/processed/PVDAQ\_2107\_clean.csv
-
-```
-
-Then run:
-
-```powershell
-
-# PVDAQ chronological holdout evaluation
-
-python src/experiments/run\_pvdaq\_validation.py
-
-# PVDAQ error-regime analysis
-
-python src/experiments/pvdaq\_error\_regime\_analysis.py
-
-# Generate PVDAQ regime figures
-
-python src/experiments/plot\_pvdaq\_analysis.py
-
-```
-
-The evaluation writes metrics to `results/metrics/`, predictions to `results/predictions/`, and figures to `results/figures/`.
-
-Run all commands from the repository root unless a script explicitly specifies otherwise.
-
----
-
-## 11. Limitations and Interpretation
-
-The following limitations apply to the current study:
-
-1. **Simulation coverage:** The controlled simulation dataset contains 496 rows and has unbalanced irradiance/shading coverage. Results apply to the tested regimes and do not establish performance across a complete factorial grid.
-
-2. **Small combined OOD sample:** The combined shading–temperature stress test contains only 20 observations. It should not be treated as a high-powered statistical benchmark.
-
-3. **Simplified shading representation:** Shading is represented through effective irradiance reduction. The simulation does not encode panel-level spatial shading masks or the full range of module and substring mismatch patterns.
-
-4. **PVDAQ shading labels:** System 2107 has no explicit shading labels. The real-world evaluation cannot isolate partial shading as the cause of observed residuals.
-
-5. **Single-system field evaluation:** The PVDAQ results represent a chronological holdout on one PV installation. Independent validation across additional systems is required.
-
-6. **Modest field improvement:** The hybrid model reduces PVDAQ RMSE by 5.46% relative to the physics baseline, substantially less than the improvement observed in controlled simulations. This gap is an important limitation and motivates further investigation.
-
-7. **Physics model assumptions:** The representative module parameterization and estimated system scaling introduce modelling assumptions into the system-level physics baseline.
-
-8. **Regime interpretation:** Error-regime comparisons identify empirical associations, not causal physical explanations. Results from small bins should be interpreted cautiously.
-
-9. **Data availability:** The complete cleaned PVDAQ dataset is excluded from version control. A fresh repository clone cannot reproduce the complete PVDAQ evaluation without separately obtaining and preparing the full data.
-
----
-
-## 12. Technology Stack
-
-- **Language:** Python
-
-- **Physics modelling:** pvlib
-
-- **Machine learning:** XGBoost
-
-- **Evaluation and model utilities:** Scikit-learn
-
-- **Data processing:** Pandas, NumPy
-
-- **Visualisation:** Matplotlib, Seaborn
-
-- **Scientific computing:** SciPy
-
----
-
-## 13. Authors
-
-- Teghvir Singh Jassal
-
-- Anshu Kumar
-
-- Aishaan
-
----
-
-## 14. Research Status
-
-This repository contains the implementation, controlled simulation experiments, PVDAQ chronological holdout evaluation, error-regime analysis, and associated visual results for the research project.
-
-A formal publication citation is not yet available. When referencing the current implementation, cite the repository URL and access date.
-
-**GitHub repository:**
-
-https://github.com/teghvirsingh2006/hybrid-physics-ml-pv-performance
+There is no formal publication yet. If you reference this work, cite the repository URL and access date.
