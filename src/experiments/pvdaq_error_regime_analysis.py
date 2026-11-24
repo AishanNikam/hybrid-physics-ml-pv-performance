@@ -22,6 +22,13 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 # ============================================================
 
 df = pd.read_csv(PRED_PATH)
+# Standardise measured power column name
+if "Actual_Power_kW" not in df.columns:
+    df = df.rename(
+        columns={
+            "Measured_DC_Power_kW": "Actual_Power_kW"
+        }
+    )
 
 print("=" * 70)
 print("PVDAQ ERROR-REGIME ANALYSIS")
@@ -43,7 +50,10 @@ print(df.columns.tolist())
 # Physics_Prediction_kW, PureML_Prediction_kW,
 # Hybrid_Prediction_kW
 
-df["timestamp"] = pd.to_datetime(df["timestamp"])
+df["timestamp"] = pd.to_datetime(
+    df["timestamp"],
+    format="%d-%m-%Y %H:%M"
+)
 
 df["Physics_Error_kW"] = (
     df["Physics_Prediction_kW"] - df["Actual_Power_kW"]
