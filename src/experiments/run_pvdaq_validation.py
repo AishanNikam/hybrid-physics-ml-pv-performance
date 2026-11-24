@@ -53,7 +53,7 @@ RANDOM_STATE = 42
 # ============================================================
 
 print("\n" + "=" * 70)
-print("PVDAQ EXTERNAL VALIDATION")
+print("PVDAQ CHRONOLOGICAL HOLDOUT EVALUATION")
 print("=" * 70)
 
 df = pd.read_csv(
@@ -95,24 +95,29 @@ temp_params = {
     "deltaT": 3,
 }
 
+# Use training-year wind statistics for missing-value handling
+train_wind_median = df.loc[
+    df["timestamp"].dt.year == TRAIN_YEAR,
+    "wind_speed_ms"
+].median()
+
+print(
+    f"Training-year wind median: "
+    f"{train_wind_median:.4f} m/s"
+)
+
+# Calculate cell temperature without using test-period
+# statistics for imputing missing wind measurements
 df["t_cell"] = sapm_cell(
     poa_global=df["poa_irradiance_wm2"].to_numpy(dtype=float),
     temp_air=df["ambient_temperature_c"].to_numpy(dtype=float),
     wind_speed=df["wind_speed_ms"].fillna(
-        df["wind_speed_ms"].median()
+        train_wind_median
     ).to_numpy(dtype=float),
     a=temp_params["a"],
     b=temp_params["b"],
     deltaT=temp_params["deltaT"],
 )
-
-print(
-    "Cell temperature range: "
-    f"{df['t_cell'].min():.2f} to "
-    f"{df['t_cell'].max():.2f} °C"
-)
-
-print(f"Rows with measured DC power: {len(df)}")
 
 
 # ============================================================
@@ -528,7 +533,7 @@ predictions.to_csv(
 # ============================================================
 
 print("\n" + "=" * 70)
-print("PVDAQ EXTERNAL VALIDATION RESULTS")
+print("PVDAQ CHRONOLOGICAL HOLDOUT RESULTS")
 print("=" * 70)
 
 print(

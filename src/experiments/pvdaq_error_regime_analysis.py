@@ -52,7 +52,8 @@ print(df.columns.tolist())
 
 df["timestamp"] = pd.to_datetime(
     df["timestamp"],
-    format="%d-%m-%Y %H:%M"
+    format="ISO8601",
+    errors="raise"
 )
 
 df["Physics_Error_kW"] = (

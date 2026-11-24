@@ -1,4 +1,5 @@
 import os
+from sklearn.model_selection import train_test_split
 import pandas as pd
 import numpy as np
 
@@ -112,13 +113,17 @@ feature_sets = {
 # ---------------------------------------------------------
 # Define train/test splits
 # ---------------------------------------------------------
-
+iid_train, iid_test = train_test_split(
+    df,
+    test_size=0.20,
+    random_state=42
+)
 splits = {
 
     "IID": (
-        df.sample(frac=0.8, random_state=42),
-        df.drop(df.sample(frac=0.8, random_state=42).index)
-    ),
+    iid_train,
+    iid_test
+),
 
     "Temperature OOD": (
         df[df["temperature_c"] <= 40],
