@@ -22,7 +22,20 @@ TEMP_PARAMS = pvlib.temperature.TEMPERATURE_MODEL_PARAMETERS["sapm"]["open_rack_
 
 FEATURES = ["G_wm2", "T_amb_c", "N_shaded", "mean_severity", "max_severity"] + [
     f"S{i}" for i in range(1, 13)
-]
+] + [f"str{k}_min" for k in range(3)] + [f"str{k}_mean" for k in range(3)] + [
+    "n_strings_shaded", "min_string_mean", "max_string_mean", "string_spread"]
+
+
+def add_string_features(df):
+    """Per-string inputs: a series string is limited by its weakest panel."""
+    S = df[[f"S{i}" for i in range(1, 13)]].values.reshape(-1, 3, 4)
+    smin, smean = S.min(axis=2), S.mean(axis=2)
+    for k in range(3):
+        df[f"str{k}_min"], df[f"str{k}_mean"] = smin[:, k], smean[:, k]
+    df["n_strings_shaded"] = (smin < 1.0).sum(axis=1)
+    df["min_string_mean"], df["max_string_mean"] = smean.min(axis=1), smean.max(axis=1)
+    df["string_spread"] = df["max_string_mean"] - df["min_string_mean"]
+    return df
 
 
 def cell_temp_c(G, T_amb, mask):
@@ -59,4 +72,4 @@ def features(G, T_amb, mask):
     row = {"G_wm2": G, "T_amb_c": T_amb, "N_shaded": int((mask < 1.0).sum()),
            "mean_severity": float(sev.mean()), "max_severity": float(sev.max())}
     row.update({f"S{i+1}": float(mask[i]) for i in range(12)})
-    return pd.DataFrame([row])[FEATURES]
+    return add_string_features(pd.DataFrame([row]))[FEATURES]

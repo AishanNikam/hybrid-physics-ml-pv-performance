@@ -44,6 +44,23 @@ FEATURES = ["G_wm2", "T_amb_c", "N_shaded", "mean_severity", "max_severity"] + [
 TARGET, PHYS = "p_reference_w", "p_physics_w"
 MODELS = ["physics", "physics+bias", "linear_res", "pure_ml", "hybrid"]
 
+# Optional topology-aware inputs (python run_pvmismatch.py --string-features):
+# a series string's current is limited by its weakest panel, so give the model
+# per-string minimum / mean sunlight and how many strings contain shade.
+STRING_FEATURES = [f"str{k}_min" for k in range(3)] + [f"str{k}_mean" for k in range(3)] + [
+    "n_strings_shaded", "min_string_mean", "max_string_mean", "string_spread"]
+
+
+def add_string_features(df):
+    S = df[[f"S{i}" for i in range(1, 13)]].values.reshape(-1, 3, 4)
+    smin, smean = S.min(axis=2), S.mean(axis=2)
+    for k in range(3):
+        df[f"str{k}_min"], df[f"str{k}_mean"] = smin[:, k], smean[:, k]
+    df["n_strings_shaded"] = (smin < 1.0).sum(axis=1)
+    df["min_string_mean"], df["max_string_mean"] = smean.min(axis=1), smean.max(axis=1)
+    df["string_spread"] = df["max_string_mean"] - df["min_string_mean"]
+    return df
+
 
 def xgb(seed):
     return XGBRegressor(
@@ -102,7 +119,14 @@ def summarize(name, y, P, seed_rmse, rng):
 
 
 def main():
+    global FEATURES, OUT
+    import sys
     df = pd.read_csv(DATA)
+    if "--string-features" in sys.argv:
+        df = add_string_features(df)
+        FEATURES = FEATURES + STRING_FEATURES
+        OUT = OUT.parent / "pvmismatch_string"
+        OUT.mkdir(parents=True, exist_ok=True)
     iid = df[df.ood_flag == "iid"].reset_index(drop=True)
     rng = np.random.default_rng(0)
     all_rows, all_paired = [], []

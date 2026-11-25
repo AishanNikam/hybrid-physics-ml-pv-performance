@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
-SIM = ROOT / "results" / "metrics" / "pvmismatch"
+SIM = ROOT / "results" / "metrics" / "pvmismatch_string"   # main model: with per-string inputs
 FLD = ROOT / "results" / "metrics" / "pvdaq_v2"
 FIG = ROOT / "results" / "figures" / "paper"
 FIG.mkdir(parents=True, exist_ok=True)

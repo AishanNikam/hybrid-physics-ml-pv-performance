@@ -1,6 +1,6 @@
 """
 Train the demo models on ALL IID rows of the PVMismatch dataset and save them.
-(Same features and XGBoost settings as src/experiments/run_pvmismatch.py, seed 42.)
+(Same features and XGBoost settings as `run_pvmismatch.py --string-features`, seed 42.)
 
 Run from repo root:  python demo/train_demo_models.py
 Creates demo/models/pure_ml.json and demo/models/hybrid_residual.json
@@ -10,7 +10,7 @@ from pathlib import Path
 import pandas as pd
 from xgboost import XGBRegressor
 
-from pv_sim import FEATURES
+from pv_sim import FEATURES, add_string_features
 
 HERE = Path(__file__).resolve().parent
 DATA = HERE.parent / "data" / "processed" / "pvmismatch_12panel_5000.csv"
@@ -22,7 +22,7 @@ def xgb():
                         colsample_bytree=0.8, objective="reg:squarederror", random_state=42)
 
 
-df = pd.read_csv(DATA)
+df = add_string_features(pd.read_csv(DATA))
 iid = df[df.ood_flag == "iid"]
 X, y, phys = iid[FEATURES], iid.p_reference_w, iid.p_physics_w
 
