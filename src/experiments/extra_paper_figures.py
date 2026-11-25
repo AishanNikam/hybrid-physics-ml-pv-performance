@@ -34,12 +34,12 @@ def feature_importance():
     m = XGBRegressor(); m.load_model(ROOT / "demo" / "models" / "hybrid_residual.json")  # +string inputs
     gain = m.get_booster().get_score(importance_type="gain")
     s = pd.Series(gain).sort_values()
-    s = s / s.sum() * 100
-    fig, ax = plt.subplots(figsize=(3.5, 3.6))
+    s = (s / s.sum() * 100).tail(15)   # top 15 of all inputs (shares are of total gain)
+    fig, ax = plt.subplots(figsize=(3.5, 2.9))
     cols = [BLUE if k.startswith("str") or "string" in k else ("#9cc2ee" if k.startswith("S") else GREY) for k in s.index]
     ax.barh(s.index, s.values, color=cols, height=0.7)
     ax.set_xlabel("Share of total gain (%)")
-    ax.set_title("Hybrid residual model: feature importance\n(dark blue = per-string inputs, light = per-panel S1-S12)")
+    ax.set_title("Hybrid residual model: top-15 inputs by gain\n(dark blue = per-string inputs, light = per-panel S1-S12)")
     ax.grid(axis="y", visible=False)
     save(fig, "fig_feature_importance")
     return s
@@ -77,7 +77,7 @@ def mask_types():
     ax.set_yticks(y, [f"{a} ({n})" for a, n in zip(t.pattern, t.n)])
     ax.invert_yaxis(); ax.set_xlabel("RMSE (W)")
     ax.set_title("Error by shading pattern (test rows, seed 42)")
-    ax.legend(frameon=False, loc="lower right"); ax.grid(axis="y", visible=False)
+    ax.legend(frameon=False, ncol=2, loc="upper center", bbox_to_anchor=(0.35, -0.14)); ax.grid(axis="y", visible=False)
     save(fig, "fig_mask_types")
     return t
 

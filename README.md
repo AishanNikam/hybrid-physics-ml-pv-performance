@@ -10,11 +10,12 @@ $$P_\text{hybrid} = P_\text{physics} + f_\theta(X), \qquad f_\theta \approx P_\t
 
 | Setting | Physics | Pure ML | **Hybrid** | Hybrid vs physics |
 |---|---:|---:|---:|---:|
-| Simulation, 12-panel array, IID test | 263.9 W | 73.4 W | **58.2 W** | −78% |
-| Simulation, all out-of-distribution (OOD) rows | 298.9 W | 233.3 W | **84.1 W** | −72% |
+| Simulation, 12-panel array, IID test | 263.9 W | 56.2 W | **36.9 W** | −86% |
+| Simulation, all out-of-distribution (OOD) rows | 298.9 W | 224.4 W | **63.5 W** | −79% |
 | Field data, PVDAQ 2107, locked 2025 test | 59.4 kW | 53.4 kW | **48.7 kW** | −18% |
 
-- **Simulation (cell-level shading with bypass diodes):** the hybrid has the lowest RMSE in all 8 test regimes. It also beats a constant-offset correction and a linear correction. Pure ML breaks down outside the training irradiance range. For example, with G out of range it scores 334 W, worse than physics alone. The hybrid stays at 91 W.
+- **Simulation (cell-level shading with bypass diodes):** with *topology-aware* per-string inputs, the hybrid has the lowest RMSE in every test regime. It also beats a constant-offset correction and a linear correction. Pure ML breaks down outside the training irradiance range. For example, with G out of range it scores 326 W, worse than physics alone. The hybrid stays at 68 W.
+- **Per-string inputs matter.** Giving the residual model each string's weakest-panel and mean sunlight, plus the number of shaded strings, cut its error from 58 to 37 W (IID) and from 84 to 64 W (OOD). It also fixed over-correction under uniform shading. See §5.1b.
 - **Field data:** the hybrid beats pure ML by 4.7 kW (95% CI from −5.5 to −4.0 kW). On this unshaded field system, though, a *linear* residual correction does as well as the XGBoost correction (48.5 vs 48.7 kW). The more complex correction pays off where real mismatch effects exist (simulation), not on field data without shading labels.
 
 All RMSEs are reported with 95% bootstrap confidence intervals. See [Results](#5-results).
@@ -122,6 +123,27 @@ Results are pooled over 5 seeds; *n* is the number of test rows per seed.
 - **Seed robustness:** the hybrid's RMSE has a seed standard deviation of 0.4–3.4 W.
 - **Error vs shading severity:** pvlib overestimates shaded power by about 18% on average. The hybrid's advantage is largest for light-to-moderate, *uneven* shading. Under heavy, near-uniform shading (more than 30% mean severity) the mean-irradiance assumption holds well, and physics alone is competitive.
 
+### 5.1b Topology-aware (per-string) inputs: main simulation model
+
+Run with `python src/experiments/run_pvmismatch.py --string-features`. Results are in `results/metrics/pvmismatch_string/`.
+
+The table above uses the base inputs. Error analysis showed that the base hybrid *over-corrected* where pvlib is already right: under uniform shading it scored 97 W against 41 W for physics, and with 4 panels in one string 231 W against 55 W. Because a series string is limited by its weakest panel, we added 10 per-string inputs:
+- each string's minimum and mean sunlight fraction;
+- the number of shaded strings;
+- the lowest and highest string mean, and the spread between them.
+
+| Test set | Physics | Linear corr. | Pure ML | Hybrid (base) | **Hybrid (+string)** |
+|---|---:|---:|---:|---:|---:|
+| IID | 263.9 | 83.5 | 56.2 | 58.2 | **36.9** |
+| G-OOD | 324.3 | 146.0 | 326.3 | 91.4 | **68.2** |
+| Shade-OOD | 287.5 | 97.0 | 143.3 | 82.4 | **58.5** |
+| All OOD | 298.9 | 118.2 | 224.4 | 84.1 | **63.5** |
+
+- **Uniform shading:** fixed (97 → 37 W, now better than physics).
+- **4 panels in one string:** halved (231 → 110 W), but physics is still best there (55 W).
+- **Top features:** the number of shaded strings (39% of gain) and the string spread (21%).
+- **How the inputs were chosen:** they were motivated by error analysis. Both versions are reported.
+
 ### 5.2 Field data: PVDAQ 2107, locked 2025 test (16,837 readings)
 
 | Model | Features | RMSE (kW) [95% CI] | MAE (kW) | Bias (kW) | R² |
@@ -168,7 +190,9 @@ IEEE-sized figures, in PDF and PNG, are in `results/figures/paper/`:
 
 | File | Content |
 |---|---|
-| `fig_sim_rmse_by_regime` | Simulation RMSE by regime, 4 models, 95% CI |
+| `fig_sim_rmse_by_regime` | Simulation RMSE by regime, 4 models, 95% CI (per-string inputs) |
+| `fig_mask_types` | Error by shading pattern, hybrid with and without per-string inputs |
+| `fig_feature_importance` | Top-15 XGBoost gain importances of the hybrid |
 | `fig_sim_parity_ood` | Predicted vs reference power on OOD rows. Pure ML saturates at about 3.5 kW (no extrapolation). |
 | `fig_sim_rmse_vs_severity` | RMSE vs mean shading severity |
 | `fig_field_rmse_summary` | PVDAQ 2025 RMSE for all models with CIs |
@@ -194,8 +218,11 @@ python src/experiments/run_pvmismatch.py
 # 3. field experiment; needs data/processed/PVDAQ_2107_clean.csv  (~10 s)
 python src/experiments/run_pvdaq_v2.py
 
+python src/experiments/run_pvmismatch.py --string-features   # main model
+
 # 4. regime analysis + paper figures
 python src/experiments/make_paper_figures.py
+python src/experiments/extra_paper_figures.py   # needs demo/models (python demo/train_demo_models.py)
 ```
 
 **Outputs**
@@ -254,6 +281,8 @@ results/
   metrics/pvmismatch/  metrics/pvdaq_v2/  figures/paper/
   (top-level metrics/ figures/ predictions/ = legacy)
 docs/                               # roadmap, mid-sem slides, working paper
+  paper/                            # final IEEE-style paper (PDF + HTML source)
+demo/                               # interactive Jupyter demo + saved models
 ```
 
 ## 11. Authors
