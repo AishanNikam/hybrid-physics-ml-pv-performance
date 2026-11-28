@@ -49,14 +49,14 @@ code { font-family: "Courier New", monospace; font-size: 8.5pt; }
 
 <div class="cols">
 
-<div class="abstract"><p><i>Abstract</i>—Physics-based PV models such as the single-diode model (SDM) extrapolate reliably, but under partial shading they misestimate array power, because they use the mean irradiance and ignore mismatch and bypass-diode effects. Pure machine-learning (ML) models can learn these effects but fail outside their training range. We study a hybrid residual model that keeps the SDM prediction and learns only its error with gradient-boosted trees. It is given <i>topology-aware</i> inputs describing how shade falls across the array's strings. On 5,000 cell-level PVMismatch simulations of a 12-panel array, with seven out-of-distribution (OOD) regimes fixed before training, the hybrid lowers RMSE relative to the SDM by 70–86% in every regime (all OOD rows: 298.9 → 63.5 W). It outperforms pure ML (224.4 W) and constant-offset and linear corrections. On NREL PVDAQ field data (development year 2024, locked test year 2025), it lowers RMSE from 59.4 to 48.7 kW and beats pure ML by 4.7 kW (95% CI [−5.5, −4.0]); a linear residual correction is equally accurate there.</p></div>
+<div class="abstract"><p><i>Abstract</i>—Physics-based PV models such as the single-diode model (SDM) extrapolate well, but they get array power wrong under partial shading: they work from the mean irradiance and so miss mismatch and bypass-diode effects. Pure machine-learning (ML) models can pick these effects up, yet break down once inputs leave their training range. We keep the SDM prediction and train gradient-boosted trees to predict only its error, using <i>topology-aware</i> inputs that describe how shade is spread over the array's strings. On 5,000 cell-level PVMismatch simulations of a 12-panel array, with seven out-of-distribution (OOD) regimes defined before training, the hybrid cuts RMSE by 70–86% relative to the SDM in every regime (all OOD rows: 298.9 → 63.5 W), ahead of pure ML (224.4 W) and of constant-offset and linear corrections. On NREL PVDAQ field data (developed on 2024, tested once on a held-out 2025), RMSE falls from 59.4 to 48.7 kW, 4.7 kW better than pure ML (95% CI [−5.5, −4.0]); there, a linear residual correction does just as well.</p></div>
 
 <div class="keywords"><p><i>Index Terms</i>—photovoltaics, partial shading, physics-guided machine learning, residual learning, XGBoost, out-of-distribution generalization.</p></div>
 
 <h2>I. Introduction</h2>
-<p>The single-diode model (SDM) [1], [2], as implemented in pvlib [3], is the standard physics model for PV power. It extrapolates well across irradiance and temperature, but it assumes that every cell receives the same irradiance. Under partial shading, shaded cells limit the current of their series string and bypass diodes conduct, so the power curve develops multiple peaks [4], [5]. An SDM driven by the <i>mean</i> irradiance cannot represent this: it overestimates power and gives the same answer for every arrangement of a given amount of shade.</p>
-<p>Data-driven models such as XGBoost [6], [7] avoid fixed assumptions, but trees are piecewise constant and cannot extrapolate beyond their training range. Physics-guided ML [8], [9] combines the two. In its simplest form, <i>residual learning</i>, the ML model learns a correction to a physics prediction rather than the output itself.</p>
-<p>Our contributions are: (i) a cell-level partial-shading benchmark with per-panel masks and seven OOD regimes fixed before training; (ii) <i>topology-aware</i> residual inputs derived from the array's series–parallel structure, which reduce the hybrid's error by 24–37%; (iii) comparisons against simple correction baselines (constant offset, linear residual) as well as pure ML; and (iv) a leakage-free field evaluation with day-block bootstrap confidence intervals.</p>
+<p>Most PV power estimates start from the single-diode model (SDM) [1], [2], usually through pvlib [3]. The SDM holds up well across irradiance and temperature, but it assumes every cell sees the same light. Partial shading breaks that assumption: a shaded cell limits the current of its whole series string, bypass diodes switch on, and the power curve develops several peaks [4], [5]. Driven by the <i>mean</i> irradiance, the SDM overestimates power, and it returns the same number no matter where a given amount of shade falls.</p>
+<p>Data-driven models such as XGBoost [6], [7] make no such assumption, but tree ensembles are piecewise constant and cannot extrapolate past their training data. Physics-guided ML [8], [9] aims for the best of both. Its simplest form is <i>residual learning</i>: instead of predicting power, the ML model predicts how far the physics model is off.</p>
+<p>This paper makes four contributions: (i) a cell-level partial-shading benchmark with per-panel masks and seven OOD regimes fixed before training; (ii) residual inputs built from the array\'s series–parallel layout, which we call <i>topology-aware</i> and which cut the hybrid\'s error by 24–37%; (iii) comparison against simple corrections (constant offset, linear residual), not only pure ML; and (iv) a leakage-free field evaluation with day-block bootstrap confidence intervals.</p>
 
 <h2>II. Method</h2>
 <h3>A. Models</h3>
@@ -68,25 +68,25 @@ code { font-family: "Courier New", monospace; font-size: 8.5pt; }
 <li><b>Pure ML</b>: XGBoost trained on <i>P</i><sub>ref</sub>.</li>
 <li><b>Hybrid</b>: <i>P</i><sub>phys</sub> + <i>g</i><sub>θ</sub>(<i>X</i>), with XGBoost <i>g</i><sub>θ</sub> trained on Δ<i>P</i>.</li>
 </ul>
-<p>Outside the training range, <i>g</i><sub>θ</sub> saturates just as pure ML does, but it is added to <i>P</i><sub>phys</sub>, which keeps following the physical trend. Both XGBoost models use the same untuned settings: 300 trees, depth 4, learning rate 0.03, subsampling 0.8. Results use five seeds.</p>
+<p>Why should the hybrid extrapolate better? Outside the training range <i>g</i><sub>θ</sub> saturates exactly like pure ML, but it is only a correction added to <i>P</i><sub>phys</sub>, and the physics term keeps following the physical trend. Both XGBoost models share one set of untuned settings (300 trees, depth 4, learning rate 0.03, subsampling 0.8), and every experiment is repeated with five seeds.</p>
 <h3>B. Inputs</h3>
 <p>The base simulation inputs are irradiance <i>G</i>, ambient temperature <i>T</i>, the twelve per-panel irradiance fractions <i>S</i><sub>i</sub>, the number of shaded panels, and the mean and maximum shading severity.</p>
-<p>A series string carries a single current and is limited by its weakest panel. We therefore add <b>topology-aware</b> inputs: for each string, the minimum and mean <i>S</i><sub>i</sub>; across strings, the number of strings containing shade, the minimum and maximum string mean, and their spread.</p>
+<p>All panels in a series string carry the same current, so a string is held back by its weakest panel. We therefore add <b>topology-aware</b> inputs: per string, the minimum and mean <i>S</i><sub>i</sub>; across strings, how many contain shade, the lowest and highest string mean, and the gap between them.</p>
 <p>For field data, the base inputs are POA irradiance, ambient and cell temperature, and wind. The <i>+time</i> set adds sin/cos of hour-of-day and day-of-year as a proxy for sun position.</p>
 <h3>C. Uncertainty</h3>
-<p>95% CIs come from 2,000 bootstrap resamples [11], paired across models for comparisons. Field readings at 15-min resolution are autocorrelated within a day, so we resample whole days (a block bootstrap [12]).</p>
+<p>We report 95% CIs from 2,000 bootstrap resamples [11], paired across models when comparing them. Field readings arrive every 15 min and are strongly correlated within a day, so we resample whole days rather than single readings (a block bootstrap [12]).</p>
 
 <h2>III. Data and Protocol</h2>
-<p><i>Simulation.</i> PVMismatch [13] solves every cell's I–V curve, including bypass diodes, for a 3 × 4 array (three strings of four modules) of a 96-cell CEC module. This serves as <i>P</i><sub>ref</sub>. Both simulators share one SAPM cell temperature, and unshaded they agree within ±5%.</p>
-<p>Each row draws <i>G</i> ∈ [100, 1200] W/m², <i>T</i> ∈ [0, 60] °C and a mask. 70% of masks are random (0–4 panels) and 30% structured (single panel, same vs. different strings, uniform, gradient). OOD regimes are fixed in the generator: <i>G</i> ∉ [200, 1000] W/m², <i>T</i> ∉ [10, 45] °C, or a panel more than 65% shaded. This gives 1,686 IID and 3,314 OOD rows in seven groups.</p>
-<p>Models are trained only on IID rows. The IID test uses five 80/20 splits; the OOD tests train on all IID rows.</p>
-<p>A calibration check exposed a defect in the original generator: modules assembled from individually constructed cells collapsed at high cell temperature, producing 343 invalid rows (e.g. 4 W instead of about 700 W). We fixed it with PVMismatch's array-level temperature and irradiance setters.</p>
-<p><i>Field data.</i> NREL PVDAQ System 2107 [14] has measured DC power only for 2024 and 2025. <b>2024</b> (16,754 readings) is the development year: every choice, including the input set and the SDM's module-count scaling, is made there, with 6-fold CV in contiguous two-month blocks. <b>2025</b> (16,837 readings) is locked and used once. The system has no shading labels.</p>
+<p><i>Simulation.</i> Our reference <i>P</i><sub>ref</sub> comes from PVMismatch [13], which solves the I–V curve of every cell, bypass diodes included, for a 3 × 4 array (three strings of four modules) of a 96-cell CEC module. Both simulators use the same SAPM cell temperature, and without shade they agree to within ±5%.</p>
+<p>For each row we draw <i>G</i> ∈ [100, 1200] W/m², <i>T</i> ∈ [0, 60] °C and a shading mask. Seventy percent of masks are random (0–4 panels); the rest are structured (one panel, panels in the same or different strings, uniform, gradient). The OOD regimes are set in the generator itself: <i>G</i> ∉ [200, 1000] W/m², <i>T</i> ∉ [10, 45] °C, or a panel more than 65% shaded. That yields 1,686 IID and 3,314 OOD rows in seven groups.</p>
+<p>Training uses IID rows only. The IID score comes from five 80/20 splits; for the OOD tests, models are trained on all IID rows.</p>
+<p>Checking calibration turned up a bug in the original generator: modules assembled cell by cell collapsed at high cell temperature, leaving 343 invalid rows (one gave 4 W where about 700 W was expected). Switching to PVMismatch's array-level temperature and irradiance setters fixed it.</p>
+<p><i>Field data.</i> NREL PVDAQ System 2107 [14] has measured DC power for 2024 and 2025 only. <b>2024</b> (16,754 readings) is our development year; every decision, including the input set and the SDM's module-count scaling, was made on it with 6-fold CV over contiguous two-month blocks. <b>2025</b> (16,837 readings) stayed locked until one final run. The system has no shading labels.</p>
 
 <h2>IV. Results</h2>
 <h3>A. Simulation</h3>
-<p>Table I and Fig. 1 show that the hybrid with topology-aware inputs is the most accurate model in every regime. It reduces RMSE relative to the SDM by 86% IID and by 70–83% OOD, and it varies by only 0.4–4.5 W across seeds. A paired bootstrap shows it beats pure ML in every regime (from −19 W IID to −258 W G-OOD); none of the 2,000 resamples favours pure ML.</p>
-<p>Pure ML fails whenever irradiance leaves the training range. In G-OOD it is worse than the SDM (326 vs. 324 W), and its predictions plateau near 3.5 kW (Fig. 2). The hybrid stays at 68 W. The offset and linear corrections remove part of the SDM's systematic overestimation (about 18% on average for shaded rows), but neither can represent the shading pattern, so both remain 1.9–3.2× worse than the hybrid.</p>
+<p>Table I and Fig. 1 show the hybrid with topology-aware inputs coming out on top in every regime. Against the SDM it lowers RMSE by 86% on IID rows and by 70–83% on OOD rows, and it moves by only 0.4–4.5 W between seeds. A paired bootstrap has it beating pure ML everywhere, by 19 W (IID) up to 258 W (G-OOD); not one of the 2,000 resamples favours pure ML.</p>
+<p>Pure ML falls apart as soon as irradiance leaves the training range. On G-OOD it is worse than the SDM (326 vs. 324 W), with predictions flattening out near 3.5 kW (Fig. 2), while the hybrid holds at 68 W. The offset and linear corrections remove part of the SDM's systematic overestimate (about 18% on average for shaded rows), but neither can tell one shading pattern from another, and both end up 1.9–3.2× worse than the hybrid.</p>
 
 <div class="tbl"><div class="tcap">Table I<br>Simulation RMSE (W), pooled over five seeds</div>
 <table>
@@ -104,21 +104,21 @@ code { font-family: "Courier New", monospace; font-size: 8.5pt; }
 </tbody></table>
 <div style="font-size:7.5pt;text-align:left;margin:-5pt 0 8pt">G/T/S: irradiance/temperature/shading OOD. <sup>†</sup>Hybrid without topology-aware inputs.</div></div>
 
-<figure class="wide"><img src="../../results/figures/paper/fig_sim_rmse_by_regime.png" alt="RMSE by regime">
+<figure class="wide"><img src="file:///home/aishan/hybrid-physics-ml-pv-performance/results/figures/paper/fig_sim_rmse_by_regime.png" alt="RMSE by regime">
 <figcaption><b>Fig. 1.</b> Simulation test RMSE per regime with 95% bootstrap CIs (topology-aware inputs). Labels give the hybrid's reduction relative to the SDM. Pure ML is worse than the SDM whenever irradiance leaves the training range.</figcaption></figure>
 
-<figure class="wide"><img src="../../results/figures/paper/fig_sim_parity_ood.png" alt="Parity plots">
+<figure class="wide"><img src="file:///home/aishan/hybrid-physics-ml-pv-performance/results/figures/paper/fig_sim_parity_ood.png" alt="Parity plots">
 <figcaption><b>Fig. 2.</b> Predicted vs. PVMismatch reference power on the 3,314 OOD rows (seed 42). The SDM overestimates under shading, pure ML saturates above its training range, and the hybrid stays on the diagonal.</figcaption></figure>
 
-<p><i>Effect of topology-aware inputs.</i> Fig. 3 breaks the error down by shading pattern. With base inputs, the hybrid over-corrected where the SDM is already nearly right: under uniform shading it scored 97 W against 41 W, and with four panels in one string 231 W against 55 W. The string-level inputs lower these errors to 37 W (now better than the SDM) and 110 W. Across all regimes the hybrid improves by 24–37%.</p>
-<p>The two most important inputs by XGBoost gain are the number of shaded strings (39%) and the spread between string means (21%), quantities the SDM cannot see. Shade concentrated in one string remains the only pattern where the SDM is more accurate, because there the true loss happens to match the mean-irradiance approximation.</p>
+<p><i>Effect of topology-aware inputs.</i> Fig. 3 splits the error by shading pattern. With base inputs only, the hybrid over-corrected where the SDM was already close: 97 W against the SDM's 41 W under uniform shade, and 231 W against 55 W with four shaded panels in one string. String-level inputs bring these down to 37 W (now beating the SDM) and 110 W. Over all regimes, the hybrid gains 24–37%.</p>
+<p>Ranked by XGBoost gain, the top two inputs are the number of shaded strings (39%) and the spread between string means (21%), neither of which the SDM can see. Shade confined to one string is the only pattern where the SDM still wins; there the true loss happens to line up with the mean-irradiance estimate.</p>
 
 
-<figure><img src="../../results/figures/paper/fig_mask_types.png" alt="Error by shading pattern">
+<figure><img src="file:///home/aishan/hybrid-physics-ml-pv-performance/results/figures/paper/fig_mask_types.png" alt="Error by shading pattern">
 <figcaption><b>Fig. 3.</b> RMSE by shading pattern on the seed-42 test rows (row counts in parentheses). The SDM overestimates power by 1.8% for four panels shaded in one string, but by 32.8% when the same shade is spread across strings.</figcaption></figure>
 
 <h3>B. Field data</h3>
-<p>Blocked CV within 2024 selected the <i>+time</i> inputs for every learned model (hybrid: 40.3 vs. 52.3 kW; better in all six folds). Table II gives the locked 2025 results.</p>
+<p>Blocked CV on 2024 picked the <i>+time</i> inputs for every learned model (hybrid: 40.3 vs. 52.3 kW, better in all six folds). Table II lists the locked 2025 results.</p>
 
 <div class="tbl"><div class="tcap">Table II<br>PVDAQ 2107: train 2024, locked test 2025 (kW)</div>
 <table>
@@ -133,23 +133,23 @@ code { font-family: "Courier New", monospace; font-size: 8.5pt; }
 <tr><td>Hybrid</td><td>+time</td><td><b>48.7</b> [45.8, 51.4]</td><td>33.2</td><td>−7.5</td></tr>
 </tbody></table></div>
 
-<p>Three findings stand out.</p>
+<p>We take three points from it.</p>
 <ol>
-<li><b>Bias dominates with base inputs.</b> The hybrid (56.0 kW) does not beat a constant offset (53.5 kW): most of its gain is the removal of the SDM's −26.8 kW bias.</li>
-<li><b>Time features give the real gain.</b> The hybrid reaches 48.7 kW (−18% vs. the SDM, CI [−12.1, −9.1] kW) and beats pure ML by 4.7 kW (CI [−5.5, −4.0]).</li>
-<li><b>A linear correction suffices here</b> (48.5 kW). On this unshaded system the residual is smooth.</li>
+<li><b>With base inputs, bias is most of the story.</b> The hybrid (56.0 kW) does not beat a constant offset (53.5 kW); most of its gain is just removing the SDM's −26.8 kW bias.</li>
+<li><b>The real gain comes from time features.</b> The hybrid drops to 48.7 kW, 18% below the SDM (CI [−12.1, −9.1] kW), and beats pure ML by 4.7 kW (CI [−5.5, −4.0]).</li>
+<li><b>A linear correction is enough here</b> (48.5 kW), since on this unshaded system the residual is smooth.</li>
 </ol>
-<p>By regime, the hybrid's error is 38% lower above 40 °C cell temperature and 35% lower at 08–10 h, where the SDM's temperature and angle-of-incidence approximations are weakest. Below 100 W/m², and at dawn and dusk (Fig. 4), it is worse than the SDM (21 vs. 15 kW below 100 W/m²), a small absolute error.</p>
-<figure><img src="../../results/figures/paper/fig_field_rmse_by_hour.png" alt="Error by hour">
+<p>Split by condition, the hybrid is 38% better above 40 °C cell temperature and 35% better from 08 to 10 h, where the SDM's temperature and angle-of-incidence approximations are weakest. Below 100 W/m² and around dawn and dusk (Fig. 4) it does worse than the SDM (21 vs. 15 kW below 100 W/m²), though the absolute error there is small.</p>
+<figure><img src="file:///home/aishan/hybrid-physics-ml-pv-performance/results/figures/paper/fig_field_rmse_by_hour.png" alt="Error by hour">
 <figcaption><b>Fig. 4.</b> PVDAQ 2025 RMSE by time of day (+time inputs).</figcaption></figure>
 
 
 <h2>V. Discussion and Limitations</h2>
-<p>Residual learning pays off when the physics error is <i>structured</i>. Under shading, the same mean irradiance can mean anything from 2% to 33% overestimation, so the error depends nonlinearly on topology. A tree-based correction with string-level inputs captures this, whereas offset and linear corrections cannot. In the field data the error is mostly a smooth bias, so a linear correction is enough. In both settings, correcting physics clearly beats replacing it with pure ML.</p>
-<p><i>Limitations.</i> PVMismatch is itself a model and has not been validated against measured shaded arrays. The topology-aware inputs were motivated by error analysis rather than selected by a separate validation step; we report both variants. The field study covers one system without shading labels, uses time features as a stand-in for sun position, and relies on an estimated system scaling. Hyperparameters were not tuned. Future work: a low-irradiance fallback to the SDM, more PVDAQ sites with known geometry, and measured shading masks.</p>
+<p>Residual learning earns its keep when the physics error has <i>structure</i>. Under shading, one value of mean irradiance can hide anything from a 2% to a 33% overestimate, so the error depends nonlinearly on topology. Trees given string-level inputs can learn that; an offset or a linear term cannot. In the field data the error is mostly a smooth bias, and a linear correction is all that is needed. Either way, correcting the physics model clearly beats discarding it for pure ML.</p>
+<p><i>Limitations.</i> PVMismatch is itself a model, and we have not checked it against measurements from shaded arrays. We arrived at the topology-aware inputs through error analysis, not a separate validation step, which is why both variants are reported. The field study covers one system with no shading labels, uses time features in place of sun position, and depends on an estimated system scaling. We did not tune hyperparameters. Next steps: an SDM fallback at low irradiance, more PVDAQ sites with known geometry, and measured shading masks.</p>
 
 <h2>VI. Conclusion</h2>
-<p>An SDM plus an XGBoost residual correction with topology-aware inputs reduced PV power error under cell-level partial shading by 70–86% across IID and seven OOD regimes, and remained accurate where pure ML failed to extrapolate. String-level inputs were the most informative features. On real field data, under a strict chronological protocol, the hybrid reduced error by 18% and significantly outperformed pure ML. A linear correction matched it there, which shows that the value of a nonlinear correction depends on how structured the physics error is.</p>
+<p>Adding an XGBoost residual correction with topology-aware inputs to the SDM cut PV power error under cell-level partial shading by 70–86% across the IID set and all seven OOD regimes, and it stayed accurate where pure ML could not extrapolate. The string-level inputs proved the most informative features. On real field data, under a strict chronological split, the hybrid lowered error by 18% and significantly outperformed pure ML. A linear correction did equally well there, suggesting that a nonlinear correction pays off only when the physics error is strongly structured.</p>
 
 <h2>References</h2>
 <div class="refs"><ol>
